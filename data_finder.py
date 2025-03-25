@@ -1,6 +1,7 @@
-
+import json
 import re
 from datetime import datetime
+from dateutil.parser import parse
 import os
 
 def extract_dates_from_text(text):
@@ -9,6 +10,7 @@ def extract_dates_from_text(text):
     Returns a list of standardized date strings and their original context.
     """
     # Various date patterns to look for
+    prefix = r'(?:(?:on|On|Date:|DATE)\s+)?'
     date_patterns = [
         # MM/DD/YY or MM/DD/YYYY
         r'\b(0?[1-9]|1[0-2])[/](0?[1-9]|[12][0-9]|3[01])[/](19|20)?[0-9]{2}\b',
@@ -34,76 +36,54 @@ def extract_dates_from_text(text):
     
     # Combined pattern
     combined_pattern = '|'.join(date_patterns)
-    
-    # Find all date matches with surrounding context
+ 
     matches = []
-    for pattern in date_patterns:
-        for match in re.finditer(pattern, text, re.IGNORECASE):
-            # Get the matched date string
-            date_str = match.group(0)
-            
-            # Get some context around the date (up to 50 chars before and after)
-            start = max(0, match.start() - 50)
-            end = min(len(text), match.end() + 50)
-            context = text[start:end].strip()
-            
-            # Replace multiple spaces and newlines with a single space
-            context = re.sub(r'\s+', ' ', context)
-            
-            matches.append({
-                'date_str': date_str,
-                'context': context,
-                'position': match.start()
-            })
-    
-    # Sort matches by position in the document
-    matches.sort(key=lambda x: x['position'])
-    
+    for match in re.finditer(combined_pattern, text, re.IGNORECASE):
+        date_str = match.group(0).strip()
+        date_str = re.sub(r'^(?:on|On|Date:|DATE)\s+', '', date_str, flags=re.IGNORECASE)
+        try:
+            date_str = parse(date_str).strftime("%Y-%m-%d")
+        except Exception:
+            continue
+        date_str = parse(date_str).strftime("%Y-%m-%d")
+        # Get some context around the date
+        start = max(0, match.start() - 100)
+        end = min(len(text), match.end() + 100)
+        # extend start and end to get full word instead of just char
+        while start > 0 and not text[start - 1].isspace():
+            start -= 1
+        while end < len(text) and not text[end].isspace():
+            end += 1
+        context = text[start:end].strip()
+        context = re.sub(r'\s+', ' ', context)  # replace multiple spaces and newlines with a single space
+        # Store results
+        matches.append({
+            'date_str': date_str,
+            'context': context
+        })
     return matches
 
 def process_text_file(file_path):
-    """Process a single text file and extract dates."""
     with open(file_path, 'r', encoding='utf-8', errors='ignore') as file:
         content = file.read()
-        
     dates = extract_dates_from_text(content)
-    
-    print(f"\nDates found in {os.path.basename(file_path)}:")
-    for i, date_info in enumerate(dates, 1):
-        print(f"{i}. {date_info['date_str']}")
-        print(f"   Context: \"{date_info['context']}\"")
-        print()
-    
     return dates
 
 def process_directory(directory_path):
-    """Process all .txt files in a directory."""
     all_dates = {}
-    
     for filename in os.listdir(directory_path):
         if filename.endswith('.txt'):
             file_path = os.path.join(directory_path, filename)
-            all_dates[filename] = process_text_file(file_path)
-    
+            dates = process_text_file(file_path)
+            if dates:
+                all_dates[filename] = dates
     return all_dates
 
-# Example usage
 if __name__ == "__main__":
-    # For a single file
-    # dates = process_text_file('path/to/your/file.txt')
-    
-    # For a directory of files
-    # all_dates = process_directory('path/to/your/directory')
-    
-    # For testing with your sample text
     data_dir = os.path.join(os.path.dirname(__file__), "texts")
-    file_path = os.path.join(data_dir, "194-10013-10011.txt")
-    with open(file_path, 'r', encoding = 'utf-8') as file:
-        sample_text = file.read()
+    all_dates = process_directory(data_dir)
     
-    dates = extract_dates_from_text(sample_text)
-    print("Dates found in sample text:")
-    for i, date_info in enumerate(dates, 1):
-        print(f"{i}. {date_info['date_str']}")
-        print(f"   Context: \"{date_info['context']}\"")
-        print()
+    all_dates_json = os.path.join(os.path.dirname(__file__), "all_dates.json")
+    with open(all_dates_json, "w") as file:
+        json.dump(all_dates, file, indent = 4)
+
